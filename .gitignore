@@ -1,0 +1,13 @@
+# build outputs
+engine
+pawnstar*
+*.o
+build/
+
+# mac
+.DS_Store
+
+# testing artifacts (big, regenerable)
+*.pgn
+*.epd
+fastchess*
