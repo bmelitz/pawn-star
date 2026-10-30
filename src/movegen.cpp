@@ -1,5 +1,8 @@
 #include "movegen.hpp"
 #include "bitboard_helpers.hpp"
+#include "magics.hpp"
+#include <cstdio>
+#include <cstdlib>
 #include <vector>
 #include <cstring>
 #include <iostream>
@@ -117,113 +120,127 @@ namespace MoveGen {
         return occupancy;
     }
 
-    // Compute per-square offsets into the flat rook/bishop tables.
-    // Must be called before init_magic so the offset arrays are ready.
+    // relevant-occupancy mask for a slider on sq: every square on its rays
+    // except the board edge (a piece on the edge can't block anything further)
+    bb slider_mask(Square sq, bool is_rook) {
+        bb mask = 0;
+        int r = to_idx(sq) / 8, f = to_idx(sq) % 8;
+        if (is_rook) {
+            for(int i=r+1; i<7; i++) BitboardHelpers::set_bit(mask, to_square(i*8+f));
+            for(int i=r-1; i>0; i--) BitboardHelpers::set_bit(mask, to_square(i*8+f));
+            for(int i=f+1; i<7; i++) BitboardHelpers::set_bit(mask, to_square(r*8+i));
+            for(int i=f-1; i>0; i--) BitboardHelpers::set_bit(mask, to_square(r*8+i));
+        } else {
+            for (int i = 1; r + i < 7 && f + i < 7; i++) BitboardHelpers::set_bit(mask, to_square((r + i) * 8 + (f + i)));
+            for (int i = 1; r - i > 0 && f + i < 7; i++) BitboardHelpers::set_bit(mask, to_square((r - i) * 8 + (f + i)));
+            for (int i = 1; r + i < 7 && f - i > 0; i++) BitboardHelpers::set_bit(mask, to_square((r + i) * 8 + (f - i)));
+            for (int i = 1; r - i > 0 && f - i > 0; i++) BitboardHelpers::set_bit(mask, to_square((r - i) * 8 + (f - i)));
+        }
+        return mask;
+    }
+
+    // Compute per-square offsets into the flat rook/bishop tables, plus the
+    // per-square shifts. Must be called before init_magic.
     void init_offsets() {
         int rook_offset = 0;
         int bishop_offset = 0;
-
         for (int sq = 0; sq < 64; sq++) {
-            int r = sq / 8, f = sq % 8;
-
-            // --- rook mask bit count ---
-            bb rmask = 0;
-            for(int i=r+1; i<7; i++) BitboardHelpers::set_bit(rmask, to_square(i*8+f));
-            for(int i=r-1; i>0; i--) BitboardHelpers::set_bit(rmask, to_square(i*8+f));
-            for(int i=f+1; i<7; i++) BitboardHelpers::set_bit(rmask, to_square(r*8+i));
-            for(int i=f-1; i>0; i--) BitboardHelpers::set_bit(rmask, to_square(r*8+i));
-            int rbits = BitboardHelpers::count_bits(rmask);
+            int rbits = BitboardHelpers::count_bits(slider_mask(to_square(sq), true));
             rook_offsets[sq] = rook_offset;
             rook_shifts[sq]  = 64 - rbits;
             rook_offset     += 1 << rbits;
 
-            // --- bishop mask bit count ---
-            bb bmask = 0;
-            for (int i = 1; r + i < 7 && f + i < 7; i++) BitboardHelpers::set_bit(bmask, to_square((r + i) * 8 + (f + i)));
-            for (int i = 1; r - i > 0 && f + i < 7; i++) BitboardHelpers::set_bit(bmask, to_square((r - i) * 8 + (f + i)));
-            for (int i = 1; r + i < 7 && f - i > 0; i++) BitboardHelpers::set_bit(bmask, to_square((r + i) * 8 + (f - i)));
-            for (int i = 1; r - i > 0 && f - i > 0; i++) BitboardHelpers::set_bit(bmask, to_square((r - i) * 8 + (f - i)));
-            int bbits = BitboardHelpers::count_bits(bmask);
+            int bbits = BitboardHelpers::count_bits(slider_mask(to_square(sq), false));
             bishop_offsets[sq] = bishop_offset;
             bishop_shifts[sq]  = 64 - bbits;
             bishop_offset     += 1 << bbits;
         }
     }
 
-    void init_magic(Square sq, bool is_rook) {
-        bb mask = 0;
-        int r = to_idx(sq) / 8, f = to_idx(sq) % 8;
-        
-        if (is_rook) {
-            for(int i=r+1; i<7; i++) BitboardHelpers::set_bit(mask, to_square(i*8+f));
-            for(int i=r-1; i>0; i--) BitboardHelpers::set_bit(mask, to_square(i*8+f));
-            for(int i=f+1; i<7; i++) BitboardHelpers::set_bit(mask, to_square(r*8+i));
-            for(int i=f-1; i>0; i--) BitboardHelpers::set_bit(mask, to_square(r*8+i));
-            rook_masks[to_idx(sq)] = mask;
-        } else {
-            for (int i = 1; r + i < 7 && f + i < 7; i++) BitboardHelpers::set_bit(mask, to_square((r + i) * 8 + (f + i)));
-            for (int i = 1; r - i > 0 && f + i < 7; i++) BitboardHelpers::set_bit(mask, to_square((r - i) * 8 + (f + i)));
-            for (int i = 1; r + i < 7 && f - i > 0; i++) BitboardHelpers::set_bit(mask, to_square((r + i) * 8 + (f - i)));
-            for (int i = 1; r - i > 0 && f - i > 0; i++) BitboardHelpers::set_bit(mask, to_square((r - i) * 8 + (f - i)));
-            bishop_masks[to_idx(sq)] = mask;
-        }
-
-        // mask_bits drives both the shift (64 - mask_bits) and the subtable size
-        // (1 << mask_bits).  This is the key difference from the old fixed-shift
-        // approach: each square uses exactly as many index bits as its mask has set
-        // bits, so no table space is wasted.
+    // Tries `magic` for sq: for every blocker subset of the mask, writes its attack
+    // set to table_start[(occ * magic) >> shift]. Returns false on a destructive
+    // collision (two subsets with different attack sets landing on the same index).
+    //
+    // mask_bits drives both the shift (64 - mask_bits) and the subtable size
+    // (1 << mask_bits): each square uses exactly as many index bits as its mask
+    // has set bits, so no table space is wasted.
+    bool try_magic(Square sq, bool is_rook, bb magic) {
+        bb mask        = is_rook ? rook_masks[to_idx(sq)] : bishop_masks[to_idx(sq)];
         int mask_bits  = BitboardHelpers::count_bits(mask);
         int shift      = 64 - mask_bits;
         int table_size = 1 << mask_bits;
-        int num_indices = table_size; // every occupancy subset maps to a unique index
-
         bb* table_start = is_rook ? &rook_table[rook_offsets[to_idx(sq)]]
                                   : &bishop_table[bishop_offsets[to_idx(sq)]];
 
-        std::vector<bb> occupancies(num_indices);
-        std::vector<bb> attacks(num_indices);
-
-        for (int i = 0; i < num_indices; i++) {
-            occupancies[i] = set_occupancy(i, mask_bits, mask);
-            if (is_rook) attacks[i] = get_rook_attacks_slow(sq, occupancies[i]);
-            else         attacks[i] = get_bishop_attacks_slow(sq, occupancies[i]);
+        std::vector<bool> filled(table_size, false);
+        for (int i = 0; i < table_size; i++) {
+            bb occupancy = set_occupancy(i, mask_bits, mask);
+            bb attacks = is_rook ? get_rook_attacks_slow(sq, occupancy)
+                                 : get_bishop_attacks_slow(sq, occupancy);
+            int magic_index = (int)((occupancy * magic) >> shift);
+            if (filled[magic_index] && table_start[magic_index] != attacks) {
+                return false;
+            }
+            table_start[magic_index] = attacks;
+            filled[magic_index] = true;
         }
+        return true;
+    }
 
+    // sets up sq's mask, shift, table pointer and magic, using the hardcoded magic
+    void init_magic(Square sq, bool is_rook) {
+        int s = to_idx(sq);
+        if (is_rook) {
+            rook_masks[s]       = slider_mask(sq, true);
+            rook_magics[s]      = Magics::ROOK_MAGICS[s];
+            rook_attacks_ptr[s] = &rook_table[rook_offsets[s]];
+        } else {
+            bishop_masks[s]       = slider_mask(sq, false);
+            bishop_magics[s]      = Magics::BISHOP_MAGICS[s];
+            bishop_attacks_ptr[s] = &bishop_table[bishop_offsets[s]];
+        }
+        if (!try_magic(sq, is_rook, is_rook ? rook_magics[s] : bishop_magics[s])) {
+            std::cerr << "Bad hardcoded magic for square " << s << (is_rook ? " (rook)\n" : " (bishop)\n");
+            std::abort();
+        }
+    }
+
+    // Random search for a working magic: sparse random numbers (AND of three
+    // randoms) succeed far more often. Masks/offsets must already be set up.
+    bb find_magic(Square sq, bool is_rook) {
+        bb mask = is_rook ? rook_masks[to_idx(sq)] : bishop_masks[to_idx(sq)];
         for (int k = 0; k < 100000000; k++) {
             bb magic = get_random_magic();
+            // quick reject: a good magic maps the mask's bits densely into the top byte
             if (BitboardHelpers::count_bits((mask * magic) & 0xFF00000000000000ULL) < 6) continue;
-
-            std::vector<bb> used(table_size, 0); 
-            std::vector<bool> index_exists(table_size, false);
-            bool fail = false;
-            
-            for (int i = 0; i < num_indices; i++) {
-                int magic_index = (int)((occupancies[i] * magic) >> shift);
-                if (!index_exists[magic_index]) {
-                    used[magic_index] = attacks[i];
-                    index_exists[magic_index] = true;
-                } else if (used[magic_index] != attacks[i]) {
-                    fail = true;
-                    break;
-                }
-            }
-
-            if (!fail) {
-                if (is_rook) {
-                    rook_magics[to_idx(sq)]      = magic;
-                    rook_attacks_ptr[to_idx(sq)] = table_start;
-                } else {
-                    bishop_magics[to_idx(sq)]      = magic;
-                    bishop_attacks_ptr[to_idx(sq)] = table_start;
-                }
-                for (int i = 0; i < num_indices; i++) {
-                    int magic_index = (int)((occupancies[i] * magic) >> shift);
-                    table_start[magic_index] = attacks[i];
-                }
-                return;
-            }
+            if (try_magic(sq, is_rook, magic)) return magic;
         }
-        std::cout << "Magic generation failed for square " << to_idx(sq) << "\n";
+        std::cerr << "Magic generation failed for square " << to_idx(sq) << "\n";
+        std::abort();
+    }
+
+    void print_magics() {
+        random_state = 1804289383; // same seed as before -> reproduces magics.hpp
+        bb rook[64], bishop[64];
+        for (int sq = 0; sq < 64; sq++) {
+            rook[sq]   = find_magic(to_square(sq), true);
+            bishop[sq] = find_magic(to_square(sq), false);
+        }
+        auto dump = [](const char* name, const bb* m) {
+            std::printf("    constexpr bb %s[64] = {\n", name);
+            for (int i = 0; i < 64; i++) {
+                std::printf("%s0x%016llxULL,%s", i % 4 == 0 ? "        " : "",
+                            (unsigned long long)m[i], i % 4 == 3 ? "\n" : " ");
+            }
+            std::printf("    };\n");
+        };
+        dump("ROOK_MAGICS", rook);
+        dump("BISHOP_MAGICS", bishop);
+        // the search overwrote the tables while testing candidates; restore them
+        for (int sq = 0; sq < 64; sq++) {
+            init_magic(to_square(sq), true);
+            init_magic(to_square(sq), false);
+        }
     }
 
     void init_tables() {
@@ -330,7 +347,8 @@ namespace MoveGen {
         return false;
     }
 
-    // only considers captures and promotions (only queen and knight promotions, regardless of capture)
+    // generates all pseudo-legal moves (legality is checked after make_move)
+    // includes all four promotion pieces, since a GUI may send an underpromotion
     void generate_pseudo_moves(const Board& board, MoveList& list) {
         list.count = 0; 
         
@@ -362,6 +380,8 @@ namespace MoveGen {
                 if (to >= 56) {
                     list.add(Move(to_square(from), to_square(to), Move::PROMO_Q));
                     list.add(Move(to_square(from), to_square(to), Move::PROMO_N));
+                    list.add(Move(to_square(from), to_square(to), Move::PROMO_R));
+                    list.add(Move(to_square(from), to_square(to), Move::PROMO_B));
                 } else {
                     list.add(Move(to_square(from), to_square(to), Move::QUIET));
                 }
@@ -415,6 +435,8 @@ namespace MoveGen {
                 if (to <= 7) { 
                     list.add(Move(to_square(from), to_square(to), Move::PROMO_Q));
                     list.add(Move(to_square(from), to_square(to), Move::PROMO_N));
+                    list.add(Move(to_square(from), to_square(to), Move::PROMO_R));
+                    list.add(Move(to_square(from), to_square(to), Move::PROMO_B));
                 } else {
                     list.add(Move(to_square(from), to_square(to), Move::QUIET));
                 }
@@ -435,6 +457,8 @@ namespace MoveGen {
                     list.add(Move(to_square(from), dest, Move::EP_CAPTURE));
                 } else if (to <= 7) { 
                     list.add(Move(to_square(from), dest, Move::PROMO_CAPTURE_Q));
+                    list.add(Move(to_square(from), dest, Move::PROMO_CAPTURE_R));
+                    list.add(Move(to_square(from), dest, Move::PROMO_CAPTURE_B));
                     list.add(Move(to_square(from), dest, Move::PROMO_CAPTURE_N));
                 } else {
                     list.add(Move(to_square(from), dest, Move::CAPTURE));
@@ -448,6 +472,8 @@ namespace MoveGen {
                     list.add(Move(to_square(from), dest, Move::EP_CAPTURE));
                 } else if (to <= 7) { 
                     list.add(Move(to_square(from), dest, Move::PROMO_CAPTURE_Q));
+                    list.add(Move(to_square(from), dest, Move::PROMO_CAPTURE_R));
+                    list.add(Move(to_square(from), dest, Move::PROMO_CAPTURE_B));
                     list.add(Move(to_square(from), dest, Move::PROMO_CAPTURE_N));
                 } else {
                     list.add(Move(to_square(from), dest, Move::CAPTURE));

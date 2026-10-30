@@ -4,6 +4,9 @@
 
 namespace MoveGen {
     void init_tables();
+
+    // re-runs the random magic search and prints the arrays for magics.hpp
+    void print_magics();
     
     // leapers and pawns
     bb get_knight_attacks(Square sq);

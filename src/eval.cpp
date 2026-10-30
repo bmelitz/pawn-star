@@ -1,6 +1,8 @@
 #include "eval.hpp"
 #include "board.hpp"
 #include "bitboard_helpers.hpp"
+#include <cstdio>
+#include <iostream>
 
 namespace Eval {
     // middle game material

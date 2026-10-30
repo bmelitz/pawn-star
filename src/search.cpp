@@ -14,7 +14,7 @@ namespace Search {
     constexpr int PIECE_VALUES[] = {100, 300, 320, 500, 900, 10000};
     // after enough half moves, even in the case of a transposition table collision we opt to evaluate
     // the position ourselves to avoid the situation where an important line would invoke the 50 move rule
-    constexpr NEAR_FIFTY_GUARD = 90;
+    constexpr int NEAR_FIFTY_GUARD = 90;
 
     std::vector<Move> extract_pv(Board& board, int max_length) {
         std::vector<Move> pv;

@@ -1,0 +1,24 @@
+name: CI
+
+on: [push, pull_request]
+
+jobs:
+  perft:
+    strategy:
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build (release)
+        run: make -j
+
+      - name: Perft suite
+        run: ./pawnstar perft-suite
+
+      - name: Build (sanitizers)
+        run: make -j debug
+
+      - name: Perft suite under ASan/UBSan
+        run: ./pawnstar-debug perft-suite
