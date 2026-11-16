@@ -3,13 +3,42 @@
 #include "tt.hpp"
 #include "bitboard_helpers.hpp"
 #include <algorithm>
+#include <chrono>
+#include <cstdlib>
 #include <iostream>
+#include <sstream>
 #include <unordered_set>
 
 namespace Search {
 
     Move best_move;
-    int nodes_searched = 0;
+    int best_score = 0;
+    uint64_t nodes_searched = 0;
+    std::atomic<bool> stop{false};
+
+    // state of the search in progress
+    static Limits limits;
+    static std::chrono::steady_clock::time_point start_time;
+    static int root_depth = 0;     // depth of the current iteration
+    static Move iteration_best;    // best root move found so far in the current iteration
+
+    static int64_t elapsed_ms() {
+        return std::chrono::duration_cast<std::chrono::milliseconds>(
+            std::chrono::steady_clock::now() - start_time).count();
+    }
+
+    // Reading the clock is slow relative to a node, so only check every 2048 nodes.
+    static inline void check_time() {
+        if ((nodes_searched & 2047) == 0 && limits.hard_ms >= 0 && elapsed_ms() >= limits.hard_ms) {
+            stop = true;
+        }
+    }
+
+    // Once this is true every node returns immediately, unwinding the search.
+    // Ignored during depth 1 so there is always a complete iteration to fall back on.
+    static inline bool stopped() {
+        return root_depth > 1 && stop.load(std::memory_order_relaxed);
+    }
 
     constexpr int PIECE_VALUES[] = {100, 300, 320, 500, 900, 10000};
     // after enough half moves, even in the case of a transposition table collision we opt to evaluate
@@ -88,6 +117,10 @@ namespace Search {
 
     int quiescence_search(Board& board, int alpha, int beta) {
         nodes_searched++;
+        check_time();
+        if (stopped()) {
+            return 0;
+        }
 
         int stand_pat = Eval::evaluate(board);
         if (stand_pat >= beta) {
@@ -133,6 +166,9 @@ namespace Search {
             int search_score = -quiescence_search(board, -beta, -alpha);
 
             board.unmake_move(m);
+            if (stopped()) {
+                return 0;
+            }
 
             if (search_score > best_score) {
                 best_score = search_score;
@@ -150,6 +186,10 @@ namespace Search {
 
     int negamax(Board& board, int depth, int alpha, int beta, int ply, bool can_extend) {
         nodes_searched++;
+        check_time();
+        if (stopped()) {
+            return 0;
+        }
 
         if (ply >= MAX_PLY) {
             return Eval::evaluate(board);
@@ -178,10 +218,11 @@ namespace Search {
         // TT::probe still runs even if near_fifty, so move ordering is preserved
         // We're only skipping the score cutoff
         // Opting to evaluate the move ourselves in case the position being close to the 50 move rule changes something
-        if (TT::probe(hash_key, depth, ply, alpha, beta, tt_score, tt_move) && !near_fifty) {
-            if (ply == 0) {
-                best_move = tt_move;
-            }
+        // Never cut off at the root: we need a real search there to pick the move
+        // (and the root position's repetition history isn't part of the TT entry).
+        // The TT move is still used for ordering.
+        bool tt_hit = TT::probe(hash_key, depth, ply, alpha, beta, tt_score, tt_move);
+        if (tt_hit && ply > 0 && !near_fifty) {
             return tt_score;
         }
 
@@ -240,12 +281,17 @@ namespace Search {
             int search_score = -negamax(board, depth - 1, -beta, -alpha, ply + 1, !is_extending);
             board.unmake_move(m);
 
+            // aborted: the score is garbage, so don't use it or store it in the TT
+            if (stopped()) {
+                return 0;
+            }
+
             if (search_score > best_score) {
                 best_score = search_score;
                 best_move_this_node = m;
 
                 if (ply == 0) {
-                    best_move = m;
+                    iteration_best = m;
                 }
             }
 
@@ -278,25 +324,72 @@ namespace Search {
         return best_score;
     }
 
-    int get_best_move(Board& board, int max_depth) {
-        nodes_searched = 0;
-        int latest_score = 0;
-
-        for (int current_depth = 1; current_depth <= max_depth; current_depth++) {
-            latest_score = negamax(board, current_depth, -INFINITY_SCORE, INFINITY_SCORE, 0, true);
-
-            std::vector<Move> pv = extract_pv(board, current_depth);
-
-            std::cout << "info depth " << current_depth
-                      << " score cp " << latest_score
-                      << " nodes " << nodes_searched
-                      << " pv ";
-            for (auto& m : pv) {
-                BitboardHelpers::print_move(m);
-                std::cout << " ";
-            }
-            std::cout << std::endl;
+    static void print_info(Board& board, int depth, int score) {
+        int64_t ms = elapsed_ms();
+        std::ostringstream out;
+        out << "info depth " << depth;
+        if (std::abs(score) >= MATE_SCORE - MAX_PLY) {
+            // UCI wants mate in moves (not plies), negative if we are getting mated
+            int plies = MATE_SCORE - std::abs(score);
+            int moves = (plies + 1) / 2;
+            out << " score mate " << (score > 0 ? moves : -moves);
+        } else {
+            out << " score cp " << score;
         }
-        return latest_score;
+        out << " nodes " << nodes_searched
+            << " nps " << nodes_searched * 1000 / std::max<int64_t>(ms, 1)
+            << " time " << ms
+            << " pv";
+        for (Move m : extract_pv(board, depth)) {
+            out << " " << BitboardHelpers::move_str(m);
+        }
+        std::cout << out.str() << std::endl;
+    }
+
+    Move think(Board& board, const Limits& search_limits) {
+        limits = search_limits;
+        start_time = std::chrono::steady_clock::now();
+        nodes_searched = 0;
+        best_move = Move();
+        best_score = 0;
+
+        for (int depth = 1; depth <= limits.depth; depth++) {
+            root_depth = depth;
+            iteration_best = Move();
+
+            int score = negamax(board, depth, -INFINITY_SCORE, INFINITY_SCORE, 0, true);
+
+            // cut off mid-iteration: keep the previous iteration's move
+            if (stopped()) {
+                break;
+            }
+
+            best_move = iteration_best;
+            best_score = score;
+
+            // no legal moves at the root (checkmate or stalemate)
+            if (best_move.data == 0) {
+                break;
+            }
+            if (limits.print_info) {
+                print_info(board, depth, score);
+            }
+            // another iteration takes several times longer than this one did,
+            // so past the soft limit it would almost surely be cut off anyway
+            if (limits.soft_ms >= 0 && elapsed_ms() >= limits.soft_ms) {
+                break;
+            }
+        }
+
+        root_depth = 0;
+        return best_move;
+    }
+
+    int get_best_move(Board& board, int max_depth) {
+        stop = false;
+        Limits fixed_depth;
+        fixed_depth.depth = max_depth;
+        think(board, fixed_depth);
+        return best_score;
     }
 }

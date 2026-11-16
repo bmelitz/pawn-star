@@ -31,19 +31,20 @@ namespace BitboardHelpers {
         return std::string{f, r};
     }
 
-    void print_move(Move m) {
+    // UCI long algebraic notation: e2e4, e7e8q, e1g1 (castling), 0000 (null move)
+    std::string move_str(Move m) {
         if (m.data == 0) {
-            std::cout << "0000";
-            return;
+            return "0000";
         }
-        std::cout << sq_str(m.from_sq()) << sq_str(m.to_sq());
+        std::string s = sq_str(m.from_sq()) + sq_str(m.to_sq());
         if (m.is_promo()) {
-            int flag = m.flag() & 3;
-            if (flag == 0) std::cout << "n";
-            else if (flag == 1) std::cout << "b";
-            else if (flag == 2) std::cout << "r";
-            else std::cout << "q";
+            s += "nbrq"[m.flag() & 3];
         }
+        return s;
+    }
+
+    void print_move(Move m) {
+        std::cout << move_str(m);
     }
 }
 

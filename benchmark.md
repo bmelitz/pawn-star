@@ -25,6 +25,16 @@ promotions out of / into check, underpromotion, and stalemate vs. checkmate.
 CI runs the full suite on every push, on Ubuntu and macOS, in both release and
 AddressSanitizer/UBSan builds.
 
+## Bench
+
+`./pawnstar bench` searches 12 positions (openings, middlegames, endgames) to depth 7 with a
+cleared TT. The search is deterministic, so the total node count is a fingerprint: it only changes
+when search behavior changes, and every commit that changes it records the new value.
+
+| Version | Bench nodes (depth 7) | Speed |
+| --- | --: | --: |
+| v0 | 34,655,664 | 7.7M nodes/s |
+
 ## Startup time
 
 Magic numbers for sliding-piece attack lookup used to be found by random search at every launch.

@@ -1,6 +1,7 @@
 #pragma once
 #include "types.hpp"
 #include <iostream>
+#include <string>
 
 // Prefers compiler intrinsics (single instruction) but falls back to C++20 <bit> or a manual loop if neither is available.
 #if defined(__GNUC__) || defined(__clang__)
@@ -80,6 +81,8 @@ namespace BitboardHelpers {
     void print_bitboard(bb bitboard);
 
     std::string sq_str(Square s);
+
+    std::string move_str(Move m);
 
     void print_move(Move m);
 }

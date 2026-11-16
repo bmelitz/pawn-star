@@ -2,6 +2,8 @@
 #include "movegen.hpp"
 #include "search.hpp"
 #include "perft.hpp"
+#include "bench.hpp"
+#include "uci.hpp"
 #include "zobrist.hpp"
 #include "tt.hpp"
 #include "bitboard_helpers.hpp"
@@ -15,6 +17,8 @@ static const char* STARTPOS = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQk
 static void usage() {
     std::cout <<
         "usage:\n"
+        "  pawnstar                        UCI mode (what GUIs and fastchess use)\n"
+        "  pawnstar bench [depth]          fixed-depth search over 12 positions; prints the node count\n"
         "  pawnstar perft <depth> [fen]    per-move node counts (divide)\n"
         "  pawnstar perft-suite            run the perft test suite (exit code 1 on failure)\n"
         "  pawnstar search <depth> [fen]   iterative-deepening search to <depth>\n"
@@ -40,7 +44,7 @@ int main(int argc, char** argv) {
 
     std::vector<std::string> args(argv + 1, argv + argc);
     if (args.empty()) {
-        usage();
+        UCI::loop();
         return 0;
     }
 
@@ -63,8 +67,14 @@ int main(int argc, char** argv) {
             BitboardHelpers::print_move(Search::best_move);
             std::cout << "  (score " << score << " cp)\n";
         }
+        else if (cmd == "bench") {
+            Bench::run(args.size() >= 2 ? std::stoi(args[1]) : Bench::DEFAULT_DEPTH);
+        }
         else if (cmd == "gen-magics") {
             MoveGen::print_magics();
+        }
+        else if (cmd == "help") {
+            usage();
         }
         else {
             usage();

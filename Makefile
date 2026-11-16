@@ -5,7 +5,7 @@
 #   make clean
 
 CXX      ?= g++
-CXXFLAGS := -std=c++17 -Wall -Wextra -MMD -MP
+CXXFLAGS := -std=c++17 -Wall -Wextra -MMD -MP -pthread
 RELEASE  := -O3 -DNDEBUG
 DEBUG    := -O1 -g -fsanitize=address,undefined -fno-omit-frame-pointer
 
