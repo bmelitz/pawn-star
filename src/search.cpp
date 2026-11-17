@@ -231,6 +231,20 @@ namespace Search {
             return quiescence_search(board, alpha, beta, ply);
         }
 
+        // Static evaluation of this position (meaningless in check: every move is forced)
+        int static_eval = in_check ? -INFINITY_SCORE : Eval::evaluate(board);
+
+        // Reverse futility pruning: near the leaves, if the static eval beats beta by
+        // a margin that grows with depth, assume the opponent can't claw it back in the
+        // few plies left and cut off right away. 80 cp per ply is a conventional margin.
+        // Skipped in check and when beta is a mate score.
+        constexpr int RFP_MAX_DEPTH = 6;
+        constexpr int RFP_MARGIN = 80;
+        if (ply > 0 && !in_check && depth <= RFP_MAX_DEPTH && std::abs(beta) < MATE_SCORE - MAX_PLY &&
+            static_eval - RFP_MARGIN * depth >= beta) {
+            return static_eval;
+        }
+
         // Null-move pruning: let the opponent move twice in a row. If our position is
         // still >= beta after a reduced-depth search, a real move would almost surely do
         // even better (doing something beats doing nothing), so cut off without searching
@@ -238,7 +252,7 @@ namespace Search {
         // so skip it when we only have pawns (where zugzwang is common), in check
         // (passing would be illegal), right after another null move, and at the root.
         if (allow_null && ply > 0 && !in_check && depth >= 3 &&
-            board.has_non_pawn_material(us) && Eval::evaluate(board) >= beta) {
+            board.has_non_pawn_material(us) && static_eval >= beta) {
             int reduction = 3 + depth / 4;
 
             StateInfo null_state;
