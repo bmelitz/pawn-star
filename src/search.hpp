@@ -2,6 +2,7 @@
 #include "board.hpp"
 #include "movegen.hpp"
 #include <atomic>
+#include <chrono>
 #include <cstdint>
 
 namespace Search {
@@ -15,6 +16,9 @@ namespace Search {
         int64_t soft_ms = -1;   // don't start a new iteration after this much time
         int64_t hard_ms = -1;   // abort the current iteration at this much time
         bool print_info = true; // print UCI "info" lines after each iteration
+        // when the clock started: set when "go" arrives, not when the search thread
+        // starts, so parsing and thread startup count against our time too
+        std::chrono::steady_clock::time_point start = std::chrono::steady_clock::now();
     };
 
     extern Move best_move;

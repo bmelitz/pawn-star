@@ -15,8 +15,9 @@ namespace UCI {
     namespace {
         const char* STARTPOS = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1";
 
-        // Safety margin for the time it takes the GUI and the OS to deliver our move.
-        constexpr int64_t MOVE_OVERHEAD_MS = 30;
+        // Safety margin for time we can't see: the GUI and OS delivering our move,
+        // and scheduling delays when many games run at once. UCI option "Move Overhead".
+        int64_t move_overhead_ms = 50;
 
         Board board;
 
@@ -93,7 +94,7 @@ namespace UCI {
                 return limits;
             }
             if (movetime >= 0) {
-                limits.soft_ms = limits.hard_ms = std::max<int64_t>(1, movetime - MOVE_OVERHEAD_MS);
+                limits.soft_ms = limits.hard_ms = std::max<int64_t>(1, movetime - move_overhead_ms);
                 return limits;
             }
 
@@ -107,7 +108,7 @@ namespace UCI {
             // Soft limit: our share of the remaining time, assuming ~20 more moves
             // (or exactly movestogo before the next time control), plus half the increment.
             // Hard limit: never sink more than half the clock (or 4x the soft limit) into one move.
-            int64_t usable = std::max<int64_t>(1, time - MOVE_OVERHEAD_MS);
+            int64_t usable = std::max<int64_t>(1, time - move_overhead_ms);
             int64_t moves_left = movestogo > 0 ? std::min(movestogo, 20) : 20;
             int64_t soft = usable / moves_left + inc / 2;
             int64_t hard = std::min(usable / 2, soft * 4);
@@ -137,6 +138,8 @@ namespace UCI {
             if (name == "Hash") {
                 stop_search();
                 TT::resize(std::clamp(std::stoi(value), 1, 1024));
+            } else if (name == "Move Overhead") {
+                move_overhead_ms = std::clamp(std::stoi(value), 0, 5000);
             }
         }
     }
@@ -175,6 +178,7 @@ namespace UCI {
                 std::cout << "id name Pawn Star\n"
                           << "id author Ben Melitz\n"
                           << "option name Hash type spin default 16 min 1 max 1024\n"
+                          << "option name Move Overhead type spin default 50 min 0 max 5000\n"
                           << "uciok" << std::endl;
             }
             else if (cmd == "isready") {

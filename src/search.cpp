@@ -363,7 +363,7 @@ namespace Search {
 
     Move think(Board& board, const Limits& search_limits) {
         limits = search_limits;
-        start_time = std::chrono::steady_clock::now();
+        start_time = limits.start;
         nodes_searched = 0;
         best_move = Move();
         best_score = 0;
