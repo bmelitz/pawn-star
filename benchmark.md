@@ -78,3 +78,6 @@ Each search feature is tested against the previous version with SPRT self-play
 | Version | Change | Elo vs previous | ± | Games |
 | --- | --- | --: | --: | --: |
 | v0 | Baseline (alpha-beta, TT, MVV-LVA, qsearch, PeSTO eval) | — | — | — |
+
+Harness sanity check: v0 against itself, 200 games at 8+0.08, scored −10 ± 40 Elo (66 wins,
+62 draws, 72 losses), consistent with 0 as it should be, with no crashes or time losses.
