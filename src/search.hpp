@@ -33,6 +33,9 @@ namespace Search {
     // last *completed* iteration (also stored in best_move / best_score).
     Move think(Board& board, const Limits& limits);
 
+    // forget killers and history, e.g. for a new game
+    void clear_heuristics();
+
     // fixed-depth search for the command line; returns the score
     int get_best_move(Board& board, int depth);
 

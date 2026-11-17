@@ -56,6 +56,40 @@ namespace Search {
         return root_depth > 1 && stop.load(std::memory_order_relaxed);
     }
 
+    // Quiet-move ordering heuristics. Captures are ordered by MVV-LVA, but most moves
+    // are quiet, and the best quiet moves are found by remembering what worked before.
+    //
+    // Killers: per ply, the last two quiet moves that caused a beta cutoff. Sibling
+    // positions (same ply, different earlier moves) often share a refutation.
+    static Move killers[MAX_PLY + 1][2];
+
+    // History: a score per (side, from, to) that rises when that quiet move causes a
+    // cutoff and falls when it was tried before the cutoff move and failed. "Gravity"
+    // keeps it within +-MAX_HISTORY: large values change less, so old results fade.
+    constexpr int MAX_HISTORY = 16384;
+    static int history[2][64][64];
+
+    static void update_history(int& entry, int bonus) {
+        entry += bonus - entry * std::abs(bonus) / MAX_HISTORY;
+    }
+
+    static inline bool is_quiet(Move m) {
+        return !m.is_capture() && !m.is_promo();
+    }
+
+    void clear_heuristics() {
+        for (auto& k : killers) {
+            k[0] = k[1] = Move();
+        }
+        for (auto& side : history) {
+            for (auto& from : side) {
+                for (int& h : from) {
+                    h = 0;
+                }
+            }
+        }
+    }
+
     constexpr int PIECE_VALUES[] = {100, 300, 320, 500, 900, 10000};
     // after enough half moves, even in the case of a transposition table collision we opt to evaluate
     // the position ourselves to avoid the situation where an important line would invoke the 50 move rule
@@ -67,7 +101,8 @@ namespace Search {
     //   the gain is +promoted_piece_value rather than a captured enemy piece.
     //   This puts promotions in the same scoring band as captures, ordered by
     //   how valuable the piece being promoted to is.
-    static inline int score_move(const Board& board, Move m, Move tt_move = Move()) {
+    // quiet moves: killers next, then by history score (ply < 0 in quiescence: no killers)
+    static inline int score_move(const Board& board, Move m, Move tt_move = Move(), int ply = -1) {
         if (m.data == tt_move.data && m.data != 0) {
             return 2000000;
         }
@@ -95,7 +130,17 @@ namespace Search {
             return 1000000 + (victim_val * 10) - PIECE_VALUES[attacker];
         }
 
-        return 0; // quiet move
+        // quiet move
+        if (ply < 0) {
+            return 0;
+        }
+        if (m.data == killers[ply][0].data) {
+            return 900000;
+        }
+        if (m.data == killers[ply][1].data) {
+            return 800000;
+        }
+        return history[to_idx(board.get_side_to_move())][to_idx(m.from_sq())][to_idx(m.to_sq())];
     }
 
     int quiescence_search(Board& board, int alpha, int beta, int ply) {
@@ -275,12 +320,14 @@ namespace Search {
 
         int move_scores[256];
         for (int i = 0; i < list.count; ++i) {
-            move_scores[i] = score_move(board, list.moves[i], tt_move);
+            move_scores[i] = score_move(board, list.moves[i], tt_move, ply);
         }
 
         int legal_moves = 0;
         int best_score = -INFINITY_SCORE;
         Move best_move_this_node = Move();
+        Move quiets_tried[256];   // quiet moves searched without a cutoff, for the history malus
+        int num_quiets = 0;
 
         for (int i = 0; i < list.count; ++i) {
             // selection sort
@@ -331,7 +378,24 @@ namespace Search {
             }
 
             if (alpha >= beta) {
+                // a quiet move refuted this position: remember it for move ordering
+                if (is_quiet(m)) {
+                    if (m.data != killers[ply][0].data) {
+                        killers[ply][1] = killers[ply][0];
+                        killers[ply][0] = m;
+                    }
+                    int bonus = depth * depth;
+                    int c = to_idx(us);
+                    update_history(history[c][to_idx(m.from_sq())][to_idx(m.to_sq())], bonus);
+                    for (int q = 0; q < num_quiets; q++) {
+                        Move bad = quiets_tried[q];
+                        update_history(history[c][to_idx(bad.from_sq())][to_idx(bad.to_sq())], -bonus);
+                    }
+                }
                 break;
+            }
+            if (is_quiet(m)) {
+                quiets_tried[num_quiets++] = m;
             }
         }
 
@@ -383,6 +447,11 @@ namespace Search {
         nodes_searched = 0;
         best_move = Move();
         best_score = 0;
+        // killers are about plies of the previous search's tree: start fresh.
+        // History carries over between moves (gravity lets stale entries fade).
+        for (auto& k : killers) {
+            k[0] = k[1] = Move();
+        }
         int64_t last_finish = 0;    // elapsed ms when the previous iteration finished
         int64_t last_duration = 0;  // how long the previous iteration took
 

@@ -28,7 +28,9 @@ namespace Bench {
         auto start = std::chrono::steady_clock::now();
 
         for (const char* fen : POSITIONS) {
-            TT::clear(); // each position starts from the same state -> deterministic
+            // each position starts from the same state -> deterministic
+            TT::clear();
+            Search::clear_heuristics();
             Board board;
             board.set_fen(fen);
 

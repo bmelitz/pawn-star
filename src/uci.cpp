@@ -191,6 +191,7 @@ namespace UCI {
             else if (cmd == "ucinewgame") {
                 stop_search();
                 TT::clear();
+                Search::clear_heuristics();
             }
             else if (cmd == "setoption") {
                 set_option(in);
