@@ -170,7 +170,7 @@ namespace Search {
         return best_score;
     }
 
-    int negamax(Board& board, int depth, int alpha, int beta, int ply, bool can_extend) {
+    int negamax(Board& board, int depth, int alpha, int beta, int ply, bool can_extend, bool allow_null) {
         pv_length[ply] = 0; // first, so every early return leaves an empty line
         nodes_searched++;
         seldepth = std::max(seldepth, ply);
@@ -230,6 +230,31 @@ namespace Search {
             return quiescence_search(board, alpha, beta, ply);
         }
 
+        // Null-move pruning: let the opponent move twice in a row. If our position is
+        // still >= beta after a reduced-depth search, a real move would almost surely do
+        // even better (doing something beats doing nothing), so cut off without searching
+        // any moves. The exception is zugzwang, where every move makes things worse,
+        // so skip it when we only have pawns (where zugzwang is common), in check
+        // (passing would be illegal), right after another null move, and at the root.
+        if (allow_null && ply > 0 && !in_check && depth >= 3 &&
+            board.has_non_pawn_material(us) && Eval::evaluate(board) >= beta) {
+            int reduction = 3 + depth / 4;
+
+            StateInfo null_state;
+            board.make_null_move(null_state);
+            int null_score = -negamax(board, std::max(depth - reduction, 0), -beta, -beta + 1,
+                                      ply + 1, true, false);
+            board.unmake_null_move();
+
+            if (stopped()) {
+                return 0;
+            }
+            if (null_score >= beta) {
+                // a "mate" found after passing isn't a real mate, so don't report one
+                return null_score >= MATE_SCORE - MAX_PLY ? beta : null_score;
+            }
+        }
+
         MoveList list;
         MoveGen::generate_pseudo_moves(board, list);
 
@@ -266,7 +291,7 @@ namespace Search {
 
             legal_moves++;
 
-            int search_score = -negamax(board, depth - 1, -beta, -alpha, ply + 1, !is_extending);
+            int search_score = -negamax(board, depth - 1, -beta, -alpha, ply + 1, !is_extending, true);
             board.unmake_move(m);
 
             // aborted: the score is garbage, so don't use it or store it in the TT
@@ -348,7 +373,7 @@ namespace Search {
             iteration_best = Move();
             seldepth = 0;
 
-            int score = negamax(board, depth, -INFINITY_SCORE, INFINITY_SCORE, 0, true);
+            int score = negamax(board, depth, -INFINITY_SCORE, INFINITY_SCORE, 0, true, true);
 
             // cut off mid-iteration: keep the previous iteration's move
             if (stopped()) {

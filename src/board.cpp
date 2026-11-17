@@ -367,6 +367,37 @@ void Board::unmake_move(Move m) {
     update_occupancies();
 }
 
+void Board::make_null_move(StateInfo& new_state) {
+    new_state = *state_;
+    new_state.previous = state_;
+    new_state.captured_piece = Piece::NONE;
+
+    // A null move isn't a real move, so repetition detection must not look back
+    // across it. is_repetition only walks back half_move_clock plies, so reset it.
+    new_state.half_move_clock = 0;
+
+    // the opponent's en passant chance expires, as after any move
+    if (new_state.en_passant_square != Square::NONE) {
+        new_state.key ^= Zobrist::ep_keys[to_idx(new_state.en_passant_square)];
+        new_state.en_passant_square = Square::NONE;
+    }
+    new_state.key ^= Zobrist::side_key;
+
+    state_ = &new_state;
+    side_to_move_ = ~side_to_move_;
+}
+
+void Board::unmake_null_move() {
+    state_ = state_->previous;
+    side_to_move_ = ~side_to_move_;
+}
+
+bool Board::has_non_pawn_material(Color c) const noexcept {
+    const int ci = to_idx(c);
+    return pieces_[ci][to_idx(Piece::KNIGHT)] | pieces_[ci][to_idx(Piece::BISHOP)] |
+           pieces_[ci][to_idx(Piece::ROOK)]   | pieces_[ci][to_idx(Piece::QUEEN)];
+}
+
 // ply = distance from the search root. A repeat of a position from inside the
 // search tree counts as a draw right away (twofold): if one side could force the
 // repeat once, it can force it again, so the position is effectively drawn.

@@ -71,6 +71,13 @@ public:
     void make_move(Move m, StateInfo& new_state);
     void unmake_move(Move m);
 
+    // "Pass": only the side to move changes. Used by null-move pruning.
+    void make_null_move(StateInfo& new_state);
+    void unmake_null_move();
+
+    // true if c has any knight, bishop, rook or queen
+    [[nodiscard]] bool has_non_pawn_material(Color c) const noexcept;
+
 private:
     void clear() noexcept;
     // put_fen_piece and remove_fen_piece update pieces_ and mailbox_ but not occuapncies_
