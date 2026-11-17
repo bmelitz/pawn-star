@@ -63,7 +63,7 @@ public:
         return state_->half_move_clock;
     }
 
-    [[nodiscard]] bool is_repetition() const noexcept;
+    [[nodiscard]] bool is_repetition(int ply) const noexcept;
     [[nodiscard]] bool is_insufficient_material() const noexcept;
 
     void print() const;

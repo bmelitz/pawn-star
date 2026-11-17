@@ -11,3 +11,6 @@ build/
 *.pgn
 *.epd
 fastchess*
+
+# SPRT binaries, opening book and game records
+sprt/

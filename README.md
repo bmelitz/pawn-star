@@ -15,7 +15,12 @@ A chess engine written from scratch in C++17.
 
 A built-in perft suite checks move generation against known node counts on 21 positions: the six
 standard ones plus en passant, castling and promotion edge cases. CI runs it on every push, on Ubuntu
-and macOS, including under AddressSanitizer/UBSan. Measurements are in [benchmark.md](benchmark.md).
+and macOS, including under AddressSanitizer/UBSan.
+
+Strength changes are measured with SPRT self-play: `scripts/sprt.sh [base]` builds the working tree
+and a base version (default `main`) and plays them against each other with
+[fastchess](https://github.com/Disservin/fastchess) until the test reaches a verdict.
+Measurements are in [benchmark.md](benchmark.md).
 
 ## Build and run
 

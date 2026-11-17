@@ -1,6 +1,7 @@
 #include "board.hpp"
 #include "bitboard_helpers.hpp"
 #include "zobrist.hpp"
+#include "movegen.hpp"
 #include <iostream>
 #include <sstream>
 #include <cstring>
@@ -197,7 +198,12 @@ void Board::make_move(Move m, StateInfo& new_state) {
         state_->half_move_clock = 0;
         
         if (flag == Move::DOUBLE_PAWN_PUSH) {
-            state_->en_passant_square = (us == Color::WHITE) ? to_square(to_idx(to) - 8) : to_square(to_idx(to) + 8);
+            Square ep = (us == Color::WHITE) ? to_square(to_idx(to) - 8) : to_square(to_idx(to) + 8);
+            // Only record the en passant square if an enemy pawn can actually capture
+            // there. Otherwise the position is the same as without it (FIDE repetition
+            // rules agree), and giving it a different hash would hide repetitions.
+            bool capturable = MoveGen::get_pawn_attacks(ep, us) & pieces_[to_idx(them)][to_idx(Piece::PAWN)];
+            state_->en_passant_square = capturable ? ep : Square::NONE;
         } else {
             state_->en_passant_square = Square::NONE;
         }
@@ -361,21 +367,35 @@ void Board::unmake_move(Move m) {
     update_occupancies();
 }
 
-bool Board::is_repetition() const noexcept {
+// ply = distance from the search root. A repeat of a position from inside the
+// search tree counts as a draw right away (twofold): if one side could force the
+// repeat once, it can force it again, so the position is effectively drawn.
+// A position from the game before the root needs to have occurred twice (threefold).
+bool Board::is_repetition(int ply) const noexcept {
+    // Only positions since the last capture or pawn move can match. The same side
+    // must be to move, so only every second ply, and the shortest cycle is 4 plies.
+    const int max_back = state_->half_move_clock;
     int count = 0;
-    StateInfo* st = state_->previous;
-    // only need to look back as far as the halfmove clock allows —
-    // a capture or pawn move makes prior positions unreachable
-    int half_moves = state_->half_move_clock;
+    const StateInfo* st = state_;
 
-    for (int i = 0; i < half_moves && st != nullptr; i++) {
-        if (st->key == state_->key) {
-            count++;
-            if (count >= 2) {
-                return true; // current + 2 prior = 3-fold
-            }
+    for (int back = 2; back <= max_back; back += 2) {
+        st = st->previous;
+        if (st == nullptr) {
+            return false;
         }
         st = st->previous;
+        if (st == nullptr) {
+            return false;
+        }
+
+        if (back >= 4 && st->key == state_->key) {
+            if (back < ply) {
+                return true;   // earlier occurrence is inside the search tree
+            }
+            if (++count == 2) {
+                return true;   // two earlier occurrences in game history
+            }
+        }
     }
     return false;
 }
@@ -492,8 +512,12 @@ void Board::set_fen(const std::string& fen) {
     if (en_passant != "-" && en_passant.length() >= 2) {
         int f = en_passant[0] - 'a';
         int r = en_passant[1] - '1';
-        if (f >= 0 && f < 8 && r >= 0 && r < 8)
-            state_->en_passant_square = to_square(r * 8 + f);
+        if (f >= 0 && f < 8 && r >= 0 && r < 8) {
+            // same rule as make_move: keep it only if the side to move has a pawn that can capture
+            Square ep = to_square(r * 8 + f);
+            bool capturable = MoveGen::get_pawn_attacks(ep, ~side_to_move_) & pieces_[to_idx(side_to_move_)][to_idx(Piece::PAWN)];
+            state_->en_passant_square = capturable ? ep : Square::NONE;
+        }
     } else {
         state_->en_passant_square = Square::NONE;
     }

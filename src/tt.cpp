@@ -71,14 +71,17 @@ namespace TT {
             return;
         }
 
+        // Keep the old move only when re-storing the same position without a new one
+        // (a fail-low node has no best move). For a different position the old move
+        // belongs to someone else, so overwrite it even with a null move.
+        if (best_move.data != 0 || entry.key != vkey) {
+            entry.move = best_move;
+        }
+
         entry.key = vkey;
         entry.depth = depth;
         entry.flag = flag;
         entry.score = score_to_tt(score, ply);
-
-        if (best_move.data != 0) {
-            entry.move = best_move; 
-        }
     }
 
     bool probe(uint64_t key, int depth, int ply, int alpha, int beta, int& tt_score, Move& tt_move) {

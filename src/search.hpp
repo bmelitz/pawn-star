@@ -3,7 +3,6 @@
 #include "movegen.hpp"
 #include <atomic>
 #include <cstdint>
-#include <vector>
 
 namespace Search {
     constexpr int INFINITY_SCORE = 32000;
@@ -33,6 +32,5 @@ namespace Search {
     // fixed-depth search for the command line; returns the score
     int get_best_move(Board& board, int depth);
 
-    std::vector<Move> extract_pv(Board& board, int max_length);
-    int quiescence_search(Board& board, int alpha, int beta);
+    int quiescence_search(Board& board, int alpha, int beta, int ply);
 }

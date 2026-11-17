@@ -21,7 +21,7 @@ promotions out of / into check, underpromotion, and stalemate vs. checkmate.
 | CPW position 6 | 4 | 3,894,594 |
 | 14 edge-case positions | 4–7 | 13,778,965 total |
 
-**Result:** 21/21 pass, 30,247,548 nodes in 1.14 s (**26.5M nodes/s**, no bulk counting).
+**Result:** 21/21 pass, 30,247,548 nodes in 0.69 s (**44M nodes/s**, no bulk counting).
 CI runs the full suite on every push, on Ubuntu and macOS, in both release and
 AddressSanitizer/UBSan builds.
 
@@ -33,7 +33,7 @@ when search behavior changes, and every commit that changes it records the new v
 
 | Version | Bench nodes (depth 7) | Speed |
 | --- | --: | --: |
-| v0 | 34,655,664 | 7.7M nodes/s |
+| v0 | 36,085,544 | 12.5M nodes/s |
 
 ## Startup time
 
@@ -55,16 +55,16 @@ verified collision-free at startup.
 
 | Metric | With TT | Without TT | Improvement |
 | --- | --: | --: | --: |
-| Nodes searched | 7,008,135 | 50,460,876 | 7.2× |
-| Time | 0.77 s | 5.92 s | 7.7× |
+| Nodes searched | 8,515,203 | 50,324,788 | 5.9× |
+| Time | 0.64 s | 3.80 s | 5.9× |
 
 ### Where the TT cutoffs come from
 
 | Flag | Cutoffs | Share |
 | --- | --: | --: |
-| EXACT | 429 | 0.4% |
-| ALPHA (upper bound) | 12,117 | 11.3% |
-| BETA (lower bound) | 95,005 | 88.3% |
+| EXACT | 589 | 0.3% |
+| ALPHA (upper bound) | 13,970 | 8.0% |
+| BETA (lower bound) | 160,266 | 91.7% |
 
 Almost all useful TT hits are **beta cutoffs**: a position already proven "too good" for the
 side to move is pruned without searching it again. Much of the remaining gain likely comes from move

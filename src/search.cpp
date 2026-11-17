@@ -7,7 +7,6 @@
 #include <cstdlib>
 #include <iostream>
 #include <sstream>
-#include <unordered_set>
 
 namespace Search {
 
@@ -21,6 +20,22 @@ namespace Search {
     static std::chrono::steady_clock::time_point start_time;
     static int root_depth = 0;     // depth of the current iteration
     static Move iteration_best;    // best root move found so far in the current iteration
+    static int seldepth = 0;       // deepest ply reached this iteration, quiescence included
+
+    // Triangular PV table. pv_table[ply] holds the best line found from the node at
+    // that ply, pv_length[ply] long. When a move raises alpha, the line becomes that
+    // move followed by the child's line (pv_table[ply + 1]). pv_table[0] ends up as
+    // the principal variation from the root. Sized MAX_PLY + 1 since ply reaches MAX_PLY.
+    static Move pv_table[MAX_PLY + 1][MAX_PLY + 1];
+    static int pv_length[MAX_PLY + 1];
+
+    static void update_pv(int ply, Move m) {
+        pv_table[ply][0] = m;
+        for (int i = 0; i < pv_length[ply + 1]; i++) {
+            pv_table[ply][i + 1] = pv_table[ply + 1][i];
+        }
+        pv_length[ply] = pv_length[ply + 1] + 1;
+    }
 
     static int64_t elapsed_ms() {
         return std::chrono::duration_cast<std::chrono::milliseconds>(
@@ -44,39 +59,6 @@ namespace Search {
     // after enough half moves, even in the case of a transposition table collision we opt to evaluate
     // the position ourselves to avoid the situation where an important line would invoke the 50 move rule
     constexpr int NEAR_FIFTY_GUARD = 90;
-
-    std::vector<Move> extract_pv(Board& board, int max_length) {
-        std::vector<Move> pv;
-        std::unordered_set<uint64_t> seen_keys;
-        std::vector<StateInfo> states(max_length);  // keep all states alive (otherwise dangling pointers)
-
-        for (int i = 0; i < max_length; i++) {
-            uint64_t key = board.get_hash();
-
-            if (seen_keys.count(key)) {
-                break;
-            }
-            seen_keys.insert(key);
-
-            int tt_score;
-            Move tt_move;
-            if (!TT::probe(key, 0, 0, -INFINITY_SCORE, INFINITY_SCORE, tt_score, tt_move)) {
-                break;
-            }
-            if (tt_move.data == 0) {
-                break;
-            }
-
-            pv.push_back(tt_move);
-            board.make_move(tt_move, states[i]);  // states[i] lives until function returns
-        }
-
-        for (int i = pv.size() - 1; i >= 0; i--) {
-            board.unmake_move(pv[i]);
-        }
-
-        return pv;
-    }
 
     // scores a move for ordering purposes
     // captures: MVV-LVA (most valuable victim, least valuable attacker)
@@ -115,16 +97,20 @@ namespace Search {
         return 0; // quiet move
     }
 
-    int quiescence_search(Board& board, int alpha, int beta) {
+    int quiescence_search(Board& board, int alpha, int beta, int ply) {
         nodes_searched++;
+        seldepth = std::max(seldepth, ply);
         check_time();
         if (stopped()) {
             return 0;
         }
 
+        // "Stand pat": the side to move doesn't have to capture, so the static eval is
+        // a lower bound. Fail-soft: return the eval itself rather than clamping to beta,
+        // matching negamax (a tighter bound is more useful to the TT and the parent).
         int stand_pat = Eval::evaluate(board);
         if (stand_pat >= beta) {
-            return beta;
+            return stand_pat;
         }
 
         int best_score = stand_pat;
@@ -163,7 +149,7 @@ namespace Search {
                 continue;
             }
 
-            int search_score = -quiescence_search(board, -beta, -alpha);
+            int search_score = -quiescence_search(board, -beta, -alpha, ply + 1);
 
             board.unmake_move(m);
             if (stopped()) {
@@ -185,7 +171,9 @@ namespace Search {
     }
 
     int negamax(Board& board, int depth, int alpha, int beta, int ply, bool can_extend) {
+        pv_length[ply] = 0; // first, so every early return leaves an empty line
         nodes_searched++;
+        seldepth = std::max(seldepth, ply);
         check_time();
         if (stopped()) {
             return 0;
@@ -205,7 +193,7 @@ namespace Search {
 
         // Skip at ply 0 — the root position is handled by the game manager,
         // and returning 0 here would prevent searching entirely
-        if (ply > 0 && (board.is_repetition() || board.is_insufficient_material() || board.get_half_move_clock() >= 100)) {
+        if (ply > 0 && (board.is_repetition(ply) || board.is_insufficient_material() || board.get_half_move_clock() >= 100)) {
             return 0;
         }
 
@@ -239,7 +227,7 @@ namespace Search {
         }
 
         if (depth == 0) {
-            return quiescence_search(board, alpha, beta);
+            return quiescence_search(board, alpha, beta, ply);
         }
 
         MoveList list;
@@ -295,8 +283,10 @@ namespace Search {
                 }
             }
 
+            // only true right after this move became the new best above alpha
             if (best_score > alpha) {
                 alpha = best_score;
+                update_pv(ply, m);
             }
 
             if (alpha >= beta) {
@@ -324,10 +314,10 @@ namespace Search {
         return best_score;
     }
 
-    static void print_info(Board& board, int depth, int score) {
+    static void print_info(int depth, int score) {
         int64_t ms = elapsed_ms();
         std::ostringstream out;
-        out << "info depth " << depth;
+        out << "info depth " << depth << " seldepth " << seldepth;
         if (std::abs(score) >= MATE_SCORE - MAX_PLY) {
             // UCI wants mate in moves (not plies), negative if we are getting mated
             int plies = MATE_SCORE - std::abs(score);
@@ -340,8 +330,8 @@ namespace Search {
             << " nps " << nodes_searched * 1000 / std::max<int64_t>(ms, 1)
             << " time " << ms
             << " pv";
-        for (Move m : extract_pv(board, depth)) {
-            out << " " << BitboardHelpers::move_str(m);
+        for (int i = 0; i < pv_length[0]; i++) {
+            out << " " << BitboardHelpers::move_str(pv_table[0][i]);
         }
         std::cout << out.str() << std::endl;
     }
@@ -356,6 +346,7 @@ namespace Search {
         for (int depth = 1; depth <= limits.depth; depth++) {
             root_depth = depth;
             iteration_best = Move();
+            seldepth = 0;
 
             int score = negamax(board, depth, -INFINITY_SCORE, INFINITY_SCORE, 0, true);
 
@@ -372,7 +363,7 @@ namespace Search {
                 break;
             }
             if (limits.print_info) {
-                print_info(board, depth, score);
+                print_info(depth, score);
             }
             // another iteration takes several times longer than this one did,
             // so past the soft limit it would almost surely be cut off anyway
