@@ -105,15 +105,19 @@ namespace UCI {
                 return limits; // no clock given, e.g. "go depth 10"
             }
 
-            // Soft limit: our share of the remaining time, assuming ~20 more moves
-            // (or exactly movestogo before the next time control), plus half the increment.
-            // Hard limit: never sink more than half the clock (or 4x the soft limit) into one move.
+            // Target: our share of the remaining time, assuming ~20 more moves (or exactly
+            // movestogo before the next time control), plus most of the increment.
             int64_t usable = std::max<int64_t>(1, time - move_overhead_ms);
             int64_t moves_left = movestogo > 0 ? std::min(movestogo, 20) : 20;
-            int64_t soft = usable / moves_left + inc / 2;
-            int64_t hard = std::min(usable / 2, soft * 4);
+            int64_t target = usable / moves_left + inc * 3 / 4;
+
+            // Soft limit = the target: the search won't start an iteration it expects to end
+            // past it (see think() in search.cpp).
+            // Hard limit: aborts an iteration that runs long anyway. At most 3x the target,
+            // and never more than a quarter of the clock, so one move can't drain it.
+            int64_t hard = std::min(usable / 4, target * 3);
             limits.hard_ms = std::max<int64_t>(1, hard);
-            limits.soft_ms = std::min(soft, limits.hard_ms);
+            limits.soft_ms = std::min(target, limits.hard_ms);
             return limits;
         }
 

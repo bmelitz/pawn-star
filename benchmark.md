@@ -80,9 +80,14 @@ Each search feature is tested against the previous version with SPRT self-play
 | --- | --- | --: | --: | --: |
 | v0 | Baseline (alpha-beta, TT, MVV-LVA, qsearch, PeSTO eval) | — | — | — |
 | v1 | Null-move pruning | +83.9 | 29.7 | 418 |
+| v2 | Time management: predict iteration cost, play partial-iteration results | +88.7 | 51.0 | 100* |
 
 The v1 test ran before a time-management fix: 49 of 418 games were lost on time, split
 roughly evenly between the two versions (27 vs 22), so the comparison is still fair but noisier.
+
+\*Fixed 100-game match rather than an SPRT. v1 often ran into its hard time limit and threw away
+the unfinished iteration; v2 stops before starting an iteration it can't finish. Only 2 of v1's
+19 losses were on time, so most of the gain is better use of thinking time. v2 had 0 timeouts.
 
 Harness sanity check: v0 against itself, 200 games at 8+0.08, scored −10 ± 40 Elo (66 wins,
 62 draws, 72 losses), consistent with 0 as it should be, with no crashes or time losses.

@@ -20,6 +20,7 @@ namespace Search {
     static std::chrono::steady_clock::time_point start_time;
     static int root_depth = 0;     // depth of the current iteration
     static Move iteration_best;    // best root move found so far in the current iteration
+    static int iteration_best_score = 0;
     static int seldepth = 0;       // deepest ply reached this iteration, quiescence included
 
     // Triangular PV table. pv_table[ply] holds the best line found from the node at
@@ -305,6 +306,7 @@ namespace Search {
 
                 if (ply == 0) {
                     iteration_best = m;
+                    iteration_best_score = search_score;
                 }
             }
 
@@ -367,6 +369,8 @@ namespace Search {
         nodes_searched = 0;
         best_move = Move();
         best_score = 0;
+        int64_t last_finish = 0;    // elapsed ms when the previous iteration finished
+        int64_t last_duration = 0;  // how long the previous iteration took
 
         for (int depth = 1; depth <= limits.depth; depth++) {
             root_depth = depth;
@@ -375,8 +379,20 @@ namespace Search {
 
             int score = negamax(board, depth, -INFINITY_SCORE, INFINITY_SCORE, 0, true, true);
 
-            // cut off mid-iteration: keep the previous iteration's move
+            // Cut off mid-iteration. The root searches the previous best move first, so any
+            // move that became iteration_best was fully searched at the new depth and scored
+            // at least as well: play it. If not even the first move finished, keep the old one.
             if (stopped()) {
+                if (iteration_best.data != 0) {
+                    best_move = iteration_best;
+                    best_score = iteration_best_score;
+                    // pv_table[0] was last updated together with iteration_best, so it
+                    // starts with the move we're about to play. Report it, so the GUI's
+                    // last PV matches our bestmove.
+                    if (limits.print_info) {
+                        print_info(depth, best_score);
+                    }
+                }
                 break;
             }
 
@@ -390,11 +406,21 @@ namespace Search {
             if (limits.print_info) {
                 print_info(depth, score);
             }
-            // another iteration takes several times longer than this one did,
-            // so past the soft limit it would almost surely be cut off anyway
-            if (limits.soft_ms >= 0 && elapsed_ms() >= limits.soft_ms) {
-                break;
+            // Don't start an iteration we expect to overrun the soft limit. Each iteration
+            // takes several times longer than the one before; estimate the next one from
+            // that growth rate (the effective branching factor) over the last two.
+            int64_t now = elapsed_ms();
+            int64_t duration = now - last_finish;
+            if (limits.soft_ms >= 0) {
+                double growth = last_duration > 0
+                    ? std::clamp(static_cast<double>(duration) / last_duration, 2.0, 10.0)
+                    : 4.0;
+                if (now + duration * growth > limits.soft_ms) {
+                    break;
+                }
             }
+            last_finish = now;
+            last_duration = duration;
         }
 
         root_depth = 0;
