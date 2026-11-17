@@ -7,7 +7,7 @@ A chess engine written from scratch in C++17.
 ## Features
 
 - **Move generation:** bitboards, magic-bitboard slider attacks, 16-bit move encoding, make/unmake, incremental Zobrist hashing
-- **Search:** iterative-deepening alpha-beta, transposition table, MVV-LVA move ordering, quiescence search, check extensions
+- **Search:** iterative-deepening alpha-beta, transposition table, null-move pruning, MVV-LVA move ordering, quiescence search, check extensions
 - **Evaluation:** PeSTO tapered piece-square tables
 - **UCI protocol** with time management, so it runs in any chess GUI or testing tool
 

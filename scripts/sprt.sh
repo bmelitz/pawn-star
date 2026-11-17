@@ -42,6 +42,9 @@ fi
 
 echo "Building dev from the working tree..."
 make -C "$ROOT" -j >/dev/null
+# rm first: overwriting a binary in place on macOS (Apple Silicon) leaves a stale
+# code-signature cache, and the OS kills the new binary on launch
+rm -f "$OUT/dev" "$OUT/base"
 cp "$ROOT/pawnstar" "$OUT/dev"
 
 echo "Building base from $BASE_REF..."
@@ -51,8 +54,14 @@ git -C "$ROOT" worktree add --detach --quiet "$TMP" "$BASE_REF"
 make -C "$TMP" -j >/dev/null
 cp "$TMP/pawnstar" "$OUT/base"
 
-echo "dev  bench: $("$OUT/dev" bench | cut -d' ' -f1)"
-echo "base bench: $("$OUT/base" bench | cut -d' ' -f1)"
+for e in dev base; do
+    nodes="$("$OUT/$e" bench | cut -d' ' -f1)" || true
+    if [ -z "$nodes" ]; then
+        echo "error: $e engine failed to run (try: \"$OUT/$e\" bench)" >&2
+        exit 1
+    fi
+    echo "$e bench: $nodes"
+done
 
 ARGS=(
     -engine cmd="$OUT/dev" name=dev

@@ -34,6 +34,7 @@ when search behavior changes, and every commit that changes it records the new v
 | Version | Bench nodes (depth 7) | Speed |
 | --- | --: | --: |
 | v0 | 36,085,544 | 12.5M nodes/s |
+| + null-move pruning | 9,779,211 | 11.6M nodes/s |
 
 ## Startup time
 
@@ -78,6 +79,10 @@ Each search feature is tested against the previous version with SPRT self-play
 | Version | Change | Elo vs previous | ± | Games |
 | --- | --- | --: | --: | --: |
 | v0 | Baseline (alpha-beta, TT, MVV-LVA, qsearch, PeSTO eval) | — | — | — |
+| v1 | Null-move pruning | +83.9 | 29.7 | 418 |
+
+The v1 test ran before a time-management fix: 49 of 418 games were lost on time, split
+roughly evenly between the two versions (27 vs 22), so the comparison is still fair but noisier.
 
 Harness sanity check: v0 against itself, 200 games at 8+0.08, scored −10 ± 40 Elo (66 wins,
 62 draws, 72 losses), consistent with 0 as it should be, with no crashes or time losses.
