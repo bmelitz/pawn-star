@@ -27,14 +27,21 @@ AddressSanitizer/UBSan builds.
 
 ## Bench
 
-`./pawnstar bench` searches 12 positions (openings, middlegames, endgames) to depth 7 with a
+`./pawnstar bench` searches 12 positions (openings, middlegames, endgames) to a fixed depth with a
 cleared TT. The search is deterministic, so the total node count is a fingerprint: it only changes
 when search behavior changes, and every commit that changes it records the new value.
 
-| Version | Bench nodes (depth 7) | Speed |
+| Version | Bench depth | Bench nodes |
 | --- | --: | --: |
-| v0 | 36,085,544 | 12.5M nodes/s |
-| + null-move pruning | 9,779,211 | 11.6M nodes/s |
+| v0 | 7 | 36,085,544 |
+| + null-move pruning | 7 | 9,779,211 |
+| + reverse futility pruning | 7 | 6,049,637 |
+| + killers and history | 7 | 3,275,912 |
+| + PVS | 7 | 2,858,512 |
+| + late move reductions | 12 | 14,734,623 |
+
+LMR made depth 7 so cheap (0.08 s) that the bench depth was raised to 12 (about 2 s) to keep it
+a meaningful fingerprint. With LMR the engine reaches 3–6 plies deeper in the same time.
 
 ## Startup time
 
@@ -81,6 +88,10 @@ Each search feature is tested against the previous version with SPRT self-play
 | v0 | Baseline (alpha-beta, TT, MVV-LVA, qsearch, PeSTO eval) | — | — | — |
 | v1 | Null-move pruning | +83.9 | 29.7 | 418 |
 | v2 | Time management: predict iteration cost, play partial-iteration results | +88.7 | 51.0 | 100* |
+| v3 | Reverse futility pruning | +58.5 | 22.6 | 492 |
+| v4 | Killer moves + history heuristic | +146.2 | ~37 | 249 |
+| v5 | Principal variation search | +64.0 | ~26 | 450 |
+| v6 | Late move reductions | +124.3 | ~36 | 271 |
 
 The v1 test ran before a time-management fix: 49 of 418 games were lost on time, split
 roughly evenly between the two versions (27 vs 22), so the comparison is still fair but noisier.
@@ -88,6 +99,11 @@ roughly evenly between the two versions (27 vs 22), so the comparison is still f
 \*Fixed 100-game match rather than an SPRT. v1 often ran into its hard time limit and threw away
 the unfinished iteration; v2 stops before starting an iteration it can't finish. Only 2 of v1's
 19 losses were on time, so most of the gain is better use of thinking time. v2 had 0 timeouts.
+
+v3–v6 all passed SPRT [0, 10] with no timeouts. For v4–v6, ± is a trinomial estimate computed
+from the saved games (fastchess reports a slightly different pentanomial value).
+Self-play gains overstate strength against other engines, and gains measured against different
+bases don't add exactly.
 
 Harness sanity check: v0 against itself, 200 games at 8+0.08, scored −10 ± 40 Elo (66 wins,
 62 draws, 72 losses), consistent with 0 as it should be, with no crashes or time losses.
