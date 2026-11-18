@@ -6,7 +6,7 @@
 // of the engine's behavior: a change that should only affect speed must leave it
 // unchanged, and every commit records it ("Bench: 1234567").
 namespace Bench {
-    constexpr int DEFAULT_DEPTH = 7;
+    constexpr int DEFAULT_DEPTH = 12;
 
     uint64_t run(int depth = DEFAULT_DEPTH);
 }

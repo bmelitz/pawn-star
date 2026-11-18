@@ -3,6 +3,8 @@
 #include "tt.hpp"
 #include "bitboard_helpers.hpp"
 #include <algorithm>
+#include <array>
+#include <cmath>
 #include <chrono>
 #include <cstdlib>
 #include <iostream>
@@ -88,6 +90,22 @@ namespace Search {
                 }
             }
         }
+    }
+
+    // Late move reductions: how many plies to cut from the search of the n-th move at a
+    // given depth. Grows with both, logarithmically: 0.75 + ln(depth) * ln(n) / 2.25,
+    // a widely used formula (e.g. depth 10, move 20 -> 3 plies).
+    static int lmr_reduction(int depth, int move_number) {
+        static const auto table = [] {
+            std::array<std::array<int, 64>, 64> t{};
+            for (int d = 1; d < 64; d++) {
+                for (int m = 1; m < 64; m++) {
+                    t[d][m] = static_cast<int>(0.75 + std::log(d) * std::log(m) / 2.25);
+                }
+            }
+            return t;
+        }();
+        return table[std::min(depth, 63)][std::min(move_number, 63)];
     }
 
     constexpr int PIECE_VALUES[] = {100, 300, 320, 500, 900, 10000};
@@ -359,6 +377,21 @@ namespace Search {
 
             legal_moves++;
 
+            // Late move reduction: with good ordering, a quiet move this far down the list
+            // is rarely best, so first search it shallower. Never for the first few moves,
+            // captures/promotions, killers, or moves that give or escape check; reduce a
+            // little less at PV nodes where accuracy matters most.
+            int reduction = 0;
+            if (depth >= 3 && legal_moves > (pv_node ? 3 : 2) && is_quiet(m) && !in_check &&
+                move_scores[i] < 800000) {
+                bool gives_check = MoveGen::is_square_attacked(
+                    board, board.get_king_square(board.get_side_to_move()), us);
+                if (!gives_check) {
+                    reduction = lmr_reduction(depth, legal_moves) - (pv_node ? 1 : 0);
+                    reduction = std::clamp(reduction, 0, depth - 2); // still search >= 1 ply
+                }
+            }
+
             // Principal variation search: with good move ordering the first move is usually
             // best, so search it with the full window and the rest with a null window
             // (alpha, alpha + 1) that only answers "does this beat alpha?", which is much
@@ -367,7 +400,12 @@ namespace Search {
             if (legal_moves == 1) {
                 search_score = -negamax(board, depth - 1, -beta, -alpha, ply + 1, !is_extending, true);
             } else {
-                search_score = -negamax(board, depth - 1, -alpha - 1, -alpha, ply + 1, !is_extending, true);
+                search_score = -negamax(board, depth - 1 - reduction, -alpha - 1, -alpha, ply + 1, !is_extending, true);
+                // the reduced search says this move beats alpha: don't trust a shallow
+                // result, verify at full depth (still with the cheap null window)
+                if (search_score > alpha && reduction > 0 && !stopped()) {
+                    search_score = -negamax(board, depth - 1, -alpha - 1, -alpha, ply + 1, !is_extending, true);
+                }
                 if (search_score > alpha && search_score < beta && !stopped()) {
                     search_score = -negamax(board, depth - 1, -beta, -alpha, ply + 1, !is_extending, true);
                 }
