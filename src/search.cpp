@@ -243,6 +243,11 @@ namespace Search {
             return 0;
         }
 
+        // PV node: a full window (beta - alpha > 1), so the exact score matters, not just a
+        // bound. With PVS, only the first move at each PV node gets a full window: every
+        // other node is a cheap null-window node, where pruning is safe to apply.
+        bool pv_node = beta - alpha > 1;
+
         uint64_t hash_key = board.get_hash();
         int tt_score;
         Move tt_move = Move();
@@ -256,7 +261,8 @@ namespace Search {
         // (and the root position's repetition history isn't part of the TT entry).
         // The TT move is still used for ordering.
         bool tt_hit = TT::probe(hash_key, depth, ply, alpha, beta, tt_score, tt_move);
-        if (tt_hit && ply > 0 && !near_fifty) {
+        // (Also not at PV nodes: the principal line should come from a real search.)
+        if (tt_hit && ply > 0 && !near_fifty && !pv_node) {
             return tt_score;
         }
 
@@ -285,7 +291,7 @@ namespace Search {
         // Skipped in check and when beta is a mate score.
         constexpr int RFP_MAX_DEPTH = 6;
         constexpr int RFP_MARGIN = 80;
-        if (ply > 0 && !in_check && depth <= RFP_MAX_DEPTH && std::abs(beta) < MATE_SCORE - MAX_PLY &&
+        if (!pv_node && !in_check && depth <= RFP_MAX_DEPTH && std::abs(beta) < MATE_SCORE - MAX_PLY &&
             static_eval - RFP_MARGIN * depth >= beta) {
             return static_eval;
         }
@@ -296,7 +302,7 @@ namespace Search {
         // any moves. The exception is zugzwang, where every move makes things worse,
         // so skip it when we only have pawns (where zugzwang is common), in check
         // (passing would be illegal), right after another null move, and at the root.
-        if (allow_null && ply > 0 && !in_check && depth >= 3 &&
+        if (allow_null && !pv_node && !in_check && depth >= 3 &&
             board.has_non_pawn_material(us) && static_eval >= beta) {
             int reduction = 3 + depth / 4;
 
@@ -353,7 +359,19 @@ namespace Search {
 
             legal_moves++;
 
-            int search_score = -negamax(board, depth - 1, -beta, -alpha, ply + 1, !is_extending, true);
+            // Principal variation search: with good move ordering the first move is usually
+            // best, so search it with the full window and the rest with a null window
+            // (alpha, alpha + 1) that only answers "does this beat alpha?", which is much
+            // cheaper. If one does (and could still be below beta), re-search it properly.
+            int search_score;
+            if (legal_moves == 1) {
+                search_score = -negamax(board, depth - 1, -beta, -alpha, ply + 1, !is_extending, true);
+            } else {
+                search_score = -negamax(board, depth - 1, -alpha - 1, -alpha, ply + 1, !is_extending, true);
+                if (search_score > alpha && search_score < beta && !stopped()) {
+                    search_score = -negamax(board, depth - 1, -beta, -alpha, ply + 1, !is_extending, true);
+                }
+            }
             board.unmake_move(m);
 
             // aborted: the score is garbage, so don't use it or store it in the TT
