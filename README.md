@@ -7,9 +7,11 @@ A chess engine written from scratch in C++17.
 ## Features
 
 - **Move generation:** bitboards, magic-bitboard slider attacks, 16-bit move encoding, make/unmake, incremental Zobrist hashing
-- **Search:** iterative-deepening principal variation search, transposition table, null-move pruning,
-  reverse futility pruning, late move reductions, quiescence search, check extensions
-- **Move ordering:** TT move, MVV-LVA captures, killer moves, history heuristic
+- **Search:** iterative-deepening principal variation search with aspiration windows, transposition table,
+  null-move pruning, reverse futility pruning, late move reductions, quiescence search with SEE pruning,
+  check extensions
+- **Move ordering:** TT move, MVV-LVA captures (losing captures last, by static exchange evaluation),
+  killer moves, history heuristic
 - **Evaluation:** PeSTO tapered piece-square tables
 - **UCI protocol**, so it runs in any chess GUI or testing tool, with time management that predicts
   each iteration's cost and won't start one it can't finish
@@ -23,7 +25,7 @@ and macOS, including under AddressSanitizer/UBSan.
 Strength changes are measured with SPRT self-play: `scripts/sprt.sh [base]` builds the working tree
 and a base version (default `main`) and plays them against each other with
 [fastchess](https://github.com/Disservin/fastchess) until the test reaches a verdict.
-So far six tested changes add roughly +550 Elo in self-play over the v0 baseline; per-change results and other
+So far eight tested changes add roughly +650 Elo in self-play over the v0 baseline; per-change results and other
 measurements are in [benchmark.md](benchmark.md).
 
 ## Build and run

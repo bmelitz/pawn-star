@@ -39,6 +39,8 @@ when search behavior changes, and every commit that changes it records the new v
 | + killers and history | 7 | 3,275,912 |
 | + PVS | 7 | 2,858,512 |
 | + late move reductions | 12 | 14,734,623 |
+| + static exchange evaluation | 12 | 10,294,796 |
+| + aspiration windows | 12 | 10,095,372 |
 
 LMR made depth 7 so cheap (0.08 s) that the bench depth was raised to 12 (about 2 s) to keep it
 a meaningful fingerprint. With LMR the engine reaches 3–6 plies deeper in the same time.
@@ -89,9 +91,11 @@ Each search feature is tested against the previous version with SPRT self-play
 | v1 | Null-move pruning | +83.9 | 29.7 | 418 |
 | v2 | Time management: predict iteration cost, play partial-iteration results | +88.7 | 51.0 | 100* |
 | v3 | Reverse futility pruning | +58.5 | 22.6 | 492 |
-| v4 | Killer moves + history heuristic | +146.2 | ~37 | 249 |
-| v5 | Principal variation search | +64.0 | ~26 | 450 |
-| v6 | Late move reductions | +124.3 | ~36 | 271 |
+| v4 | Killer moves + history heuristic | +145.2 | 35.0 | 249 |
+| v5 | Principal variation search | +64.0 | 22.5 | 450 |
+| v6 | Late move reductions | +124.8 | 32.9 | 271 |
+| v7 | Static exchange evaluation (qsearch pruning, capture ordering) | +33.2 | 16.4 | 905 |
+| v8 | Aspiration windows | +56.4 | 22.3 | 528 |
 
 The v1 test ran before a time-management fix: 49 of 418 games were lost on time, split
 roughly evenly between the two versions (27 vs 22), so the comparison is still fair but noisier.
@@ -100,8 +104,9 @@ roughly evenly between the two versions (27 vs 22), so the comparison is still f
 the unfinished iteration; v2 stops before starting an iteration it can't finish. Only 2 of v1's
 19 losses were on time, so most of the gain is better use of thinking time. v2 had 0 timeouts.
 
-v3–v6 all passed SPRT [0, 10] with no timeouts. For v4–v6, ± is a trinomial estimate computed
-from the saved games (fastchess reports a slightly different pentanomial value).
+v3–v8 all passed SPRT [0, 10] with no timeouts. For v4–v7, the summary was recomputed from the
+saved games, pairing them as fastchess does (pentanomial); the same method reproduces v8's fastchess
+summary exactly.
 Self-play gains overstate strength against other engines, and gains measured against different
 bases don't add exactly.
 
