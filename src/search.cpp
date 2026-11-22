@@ -525,16 +525,49 @@ namespace Search {
 
         for (int depth = 1; depth <= limits.depth; depth++) {
             root_depth = depth;
-            iteration_best = Move();
-            seldepth = 0;
 
-            int score = negamax(board, depth, -INFINITY_SCORE, INFINITY_SCORE, 0, true, true);
+            // Aspiration windows: the score rarely moves much between iterations, so search
+            // a narrow window around the last one. A narrower window means more cutoffs.
+            // If the true score falls outside it (fail low / fail high), widen that side,
+            // doubling the margin each time, and search again. Not at low depths, where
+            // scores still jump around, and not around mate scores.
+            constexpr int ASPIRATION_DELTA = 25;
+            int delta = ASPIRATION_DELTA;
+            int alpha = -INFINITY_SCORE;
+            int beta = INFINITY_SCORE;
+            if (depth >= 5 && std::abs(best_score) < MATE_SCORE - MAX_PLY) {
+                alpha = best_score - delta;
+                beta = best_score + delta;
+            }
 
-            // Cut off mid-iteration. The root searches the previous best move first, so any
-            // move that became iteration_best was fully searched at the new depth and scored
-            // at least as well: play it. If not even the first move finished, keep the old one.
+            int score;
+            int window_alpha;
+            while (true) {
+                iteration_best = Move();
+                seldepth = 0;
+                window_alpha = alpha;
+                score = negamax(board, depth, alpha, beta, 0, true, true);
+                if (stopped()) {
+                    break;
+                }
+                if (score <= alpha) {           // fail low: true score is somewhere below
+                    beta = (alpha + beta) / 2;
+                    alpha = std::max(score - delta, -INFINITY_SCORE);
+                } else if (score >= beta) {     // fail high: somewhere above
+                    beta = std::min(score + delta, INFINITY_SCORE);
+                } else {
+                    break;                      // inside the window: exact score
+                }
+                delta *= 2;
+            }
+
+            // Cut off mid-iteration. The root searches the previous best move first, so a
+            // move that became iteration_best with a score above the window's alpha was fully
+            // searched at the new depth and scored at least as well: play it. (A score at or
+            // below alpha is only an upper bound, so it can't be trusted.) If no move
+            // qualifies, keep the previous iteration's move.
             if (stopped()) {
-                if (iteration_best.data != 0) {
+                if (iteration_best.data != 0 && iteration_best_score > window_alpha) {
                     best_move = iteration_best;
                     best_score = iteration_best_score;
                     // pv_table[0] was last updated together with iteration_best, so it
