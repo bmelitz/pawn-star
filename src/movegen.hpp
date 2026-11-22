@@ -26,4 +26,13 @@ namespace MoveGen {
     void generate_captures(const Board& board, MoveList& list);
 
     bool is_square_attacked(const Board& board, Square sq, Color attacker);
+
+    // every piece (both colors) attacking sq, given an occupancy. Passing a modified
+    // occupancy lets SEE "remove" pieces and see the sliders behind them (x-rays).
+    bb attackers_to(const Board& board, Square sq, bb occupancy);
+
+    // Static exchange evaluation: the material outcome (centipawns, for the side making
+    // the move) of capturing on m's target square and then letting both sides keep
+    // recapturing there with their least valuable piece, each free to stop at any point.
+    int see(const Board& board, Move m);
 }

@@ -145,7 +145,13 @@ namespace Search {
                 }
             }
 
-            return 1000000 + (victim_val * 10) - PIECE_VALUES[attacker];
+            int mvv_lva = (victim_val * 10) - PIECE_VALUES[attacker];
+            // In the main search, captures that lose material in the exchange (SEE < 0)
+            // go after the quiet moves instead of before them.
+            if (ply >= 0 && MoveGen::see(board, m) < 0) {
+                return -1000000 + mvv_lva;
+            }
+            return 1000000 + mvv_lva;
         }
 
         // quiet move
@@ -203,6 +209,12 @@ namespace Search {
             std::swap(move_scores[i], move_scores[best_idx]);
 
             Move m = list.moves[i];
+
+            // Skip captures that lose material once all the recaptures are played out:
+            // standing pat is already better than them. (Promotions are always searched.)
+            if (!m.is_promo() && MoveGen::see(board, m) < 0) {
+                continue;
+            }
 
             StateInfo next_state;
             board.make_move(m, next_state);

@@ -3,6 +3,7 @@
 #include "magics.hpp"
 #include <cstdio>
 #include <cstdlib>
+#include <algorithm>
 #include <vector>
 #include <cstring>
 #include <iostream>
@@ -345,6 +346,88 @@ namespace MoveGen {
         if (get_bishop_attacks(sq, board.get_all_occupancy()) & bishops_queens) return true;
 
         return false;
+    }
+
+    bb attackers_to(const Board& board, Square sq, bb occ) {
+        using P = Piece;
+        auto both = [&](P p) { return board.get_pieces(Color::WHITE, p) | board.get_pieces(Color::BLACK, p); };
+        bb diag = both(P::BISHOP) | both(P::QUEEN);
+        bb orth = both(P::ROOK) | both(P::QUEEN);
+        return (pawn_attacks[to_idx(Color::BLACK)][to_idx(sq)] & board.get_pieces(Color::WHITE, P::PAWN))
+             | (pawn_attacks[to_idx(Color::WHITE)][to_idx(sq)] & board.get_pieces(Color::BLACK, P::PAWN))
+             | (get_knight_attacks(sq) & both(P::KNIGHT))
+             | (get_king_attacks(sq) & both(P::KING))
+             | (get_bishop_attacks(sq, occ) & diag)
+             | (get_rook_attacks(sq, occ) & orth);
+    }
+
+    int see(const Board& board, Move m) {
+        constexpr int VALUE[7] = {100, 300, 300, 500, 900, 20000, 0}; // P N B R Q K, none
+        Square from = m.from_sq(), to = m.to_sq();
+        if (m.flag() == Move::KING_CASTLE || m.flag() == Move::QUEEN_CASTLE) {
+            return 0;
+        }
+
+        bb occ = board.get_all_occupancy();
+        int victim = m.flag() == Move::EP_CAPTURE ? 0
+                   : (board.get_full_piece(to) == -1 ? 6 : board.get_full_piece(to) % 6);
+        int attacker = board.get_full_piece(from) % 6;
+
+        // gain[d] = net material for the side making capture d, if the exchange stopped there
+        int gain[32];
+        int d = 0;
+        gain[0] = VALUE[victim];
+        int on_square = VALUE[attacker];          // value of the piece now standing on `to`
+        if (m.is_promo()) {
+            int promo = (m.flag() & 3) + 1;         // N, B, R, Q
+            gain[0] += VALUE[promo] - VALUE[0];
+            on_square = VALUE[promo];
+        }
+
+        occ ^= 1ULL << to_idx(from);              // the first capturer has left its square
+        if (m.flag() == Move::EP_CAPTURE) {       // the captured pawn isn't on `to`
+            int cap = board.get_side_to_move() == Color::WHITE ? to_idx(to) - 8 : to_idx(to) + 8;
+            occ ^= 1ULL << cap;
+        }
+
+        bb diag = board.get_pieces(Color::WHITE, Piece::BISHOP) | board.get_pieces(Color::BLACK, Piece::BISHOP)
+                | board.get_pieces(Color::WHITE, Piece::QUEEN)  | board.get_pieces(Color::BLACK, Piece::QUEEN);
+        bb orth = board.get_pieces(Color::WHITE, Piece::ROOK)   | board.get_pieces(Color::BLACK, Piece::ROOK)
+                | board.get_pieces(Color::WHITE, Piece::QUEEN)  | board.get_pieces(Color::BLACK, Piece::QUEEN);
+
+        bb attackers = attackers_to(board, to, occ) & occ;
+        Color side = ~board.get_side_to_move();   // the opponent recaptures next
+
+        while (d < 31) {
+            bb mine = attackers & board.get_occupancy(side);
+            if (!mine) {
+                break;
+            }
+            // least valuable attacker of `side`
+            int p = 0;
+            bb pick = 0;
+            for (; p < 6; p++) {
+                pick = mine & board.get_pieces(side, to_piece(p));
+                if (pick) {
+                    break;
+                }
+            }
+            d++;
+            gain[d] = on_square - gain[d - 1];
+            occ ^= pick & (~pick + 1);            // remove that one attacker (lowest bit)
+            // x-rays: a slider that was hiding behind the piece that just moved now attacks
+            attackers |= (get_bishop_attacks(to, occ) & diag) | (get_rook_attacks(to, occ) & orth);
+            attackers &= occ;
+            on_square = VALUE[p];
+            side = ~side;
+        }
+
+        // Unwind: each side either makes its capture or stops, whichever is better for it.
+        while (d > 0) {
+            gain[d - 1] = -std::max(-gain[d - 1], gain[d]);
+            d--;
+        }
+        return gain[0];
     }
 
     // generates all pseudo-legal moves (legality is checked after make_move)
