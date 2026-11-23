@@ -15,6 +15,8 @@ A chess engine written from scratch in C++17.
 - **Evaluation:** PeSTO tapered piece-square tables
 - **UCI protocol**, so it runs in any chess GUI or testing tool, with time management that predicts
   each iteration's cost and won't start one it can't finish
+- **Opening book:** ~40 main lines of popular openings built in, matched by position hash so
+  transpositions are found; used in timed games only (UCI option `OwnBook`, off for testing)
 
 ## Testing
 

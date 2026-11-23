@@ -1,5 +1,6 @@
 #include "uci.hpp"
 #include "bitboard_helpers.hpp"
+#include "book.hpp"
 #include "movegen.hpp"
 #include "search.hpp"
 #include "tt.hpp"
@@ -18,6 +19,9 @@ namespace UCI {
         // Safety margin for time we can't see: the GUI and OS delivering our move,
         // and scheduling delays when many games run at once. UCI option "Move Overhead".
         int64_t move_overhead_ms = 50;
+
+        // UCI option "OwnBook": play from the built-in opening book when possible
+        bool own_book = true;
 
         Board board;
 
@@ -124,6 +128,18 @@ namespace UCI {
         void go(std::istringstream& in) {
             stop_search();
             Search::Limits limits = parse_go(in);
+
+            // Book moves only in timed play: analysis ("go infinite", "go depth")
+            // should show the engine's own evaluation.
+            if (own_book && limits.hard_ms >= 0) {
+                Move book_move = Book::probe(board);
+                if (book_move.data != 0) {
+                    std::cout << "info string book move\n"
+                              << "bestmove " << BitboardHelpers::move_str(book_move) << std::endl;
+                    return;
+                }
+            }
+
             Search::stop = false;
             search_thread = std::thread([limits] {
                 Move best = Search::think(board, limits);
@@ -142,6 +158,8 @@ namespace UCI {
             if (name == "Hash") {
                 stop_search();
                 TT::resize(std::clamp(std::stoi(value), 1, 1024));
+            } else if (name == "OwnBook") {
+                own_book = (value == "true");
             } else if (name == "Move Overhead") {
                 move_overhead_ms = std::clamp(std::stoi(value), 0, 5000);
             }
@@ -183,6 +201,7 @@ namespace UCI {
                           << "id author Ben Melitz\n"
                           << "option name Hash type spin default 16 min 1 max 1024\n"
                           << "option name Move Overhead type spin default 50 min 0 max 5000\n"
+                          << "option name OwnBook type check default true\n"
                           << "uciok" << std::endl;
             }
             else if (cmd == "isready") {

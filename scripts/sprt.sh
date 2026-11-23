@@ -66,7 +66,7 @@ done
 ARGS=(
     -engine cmd="$OUT/dev" name=dev
     -engine cmd="$OUT/base" name=base
-    -each tc="$TC" option.Hash=16
+    -each tc="$TC" option.Hash=16 option.OwnBook=false
     -openings file="$BOOK" format=epd order=random
     -rounds "$ROUNDS" -repeat -concurrency "$CONCURRENCY" -recover
     -pgnout file="$OUT/games-$(date +%Y%m%d-%H%M%S).pgn"

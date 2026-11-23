@@ -4,6 +4,7 @@
 #include "perft.hpp"
 #include "bench.hpp"
 #include "uci.hpp"
+#include "book.hpp"
 #include "zobrist.hpp"
 #include "tt.hpp"
 #include "bitboard_helpers.hpp"
@@ -40,6 +41,9 @@ static std::string fen_from(const std::vector<std::string>& args, size_t i) {
 int main(int argc, char** argv) {
     MoveGen::init_tables();
     Zobrist::init();
+    if (!Book::init()) {
+        return 1;
+    }
     TT::resize(16);
 
     std::vector<std::string> args(argv + 1, argv + argc);
